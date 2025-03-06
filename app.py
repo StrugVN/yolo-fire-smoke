@@ -6,7 +6,7 @@ import queue
 import time
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog,
-                            QSlider, QComboBox, QMessageBox)
+                            QSlider, QComboBox, QMessageBox, QMenu)
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 from ultralytics import YOLO
@@ -314,6 +314,7 @@ class YOLODetectionApp(QMainWindow):
         self.model_path = model_path
         self.video_thread = None
         self.current_source_type = None  # 'rtsp' or 'file'
+        self.default_model_path = model_path  # Store the default model path
         
         self.init_ui()
         
@@ -338,17 +339,68 @@ class YOLODetectionApp(QMainWindow):
         self.rtsp_input.setPlaceholderText("Enter URL...")
         top_control_layout.addWidget(self.rtsp_input)
         
-        # Open Stream button
+        # Create split button for Open Stream/Snapshot Stream
+        self.stream_btn = QWidget()
+        stream_layout = QHBoxLayout(self.stream_btn)
+        stream_layout.setContentsMargins(0, 0, 0, 0)
+        stream_layout.setSpacing(0)
+        
+        # Main button part
         self.open_stream_btn = QPushButton("Open Stream")
         self.open_stream_btn.clicked.connect(self.open_stream)
-        self.open_stream_btn.setMaximumWidth(100)
-        top_control_layout.addWidget(self.open_stream_btn)
+        self.open_stream_btn.setStyleSheet("""
+            QPushButton {
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+                border-right: 1px solid #c0c0c0;
+                padding: 4px 8px;
+            }
+        """)
+        stream_layout.addWidget(self.open_stream_btn)
         
-        # Open File button
-        self.open_file_btn = QPushButton("Open File")
-        self.open_file_btn.clicked.connect(self.open_file)
-        self.open_file_btn.setMaximumWidth(100)
-        top_control_layout.addWidget(self.open_file_btn)
+        # Arrow part
+        self.stream_dropdown_btn = QPushButton("▼")
+        self.stream_dropdown_btn.setMaximumWidth(20)
+        self.stream_dropdown_btn.setStyleSheet("""
+            QPushButton {
+                border-top-left-radius: 0px;
+                border-bottom-left-radius: 0px;
+                padding: 4px 2px;
+            }
+        """)
+        stream_layout.addWidget(self.stream_dropdown_btn)
+        
+        # Set fixed width for split button
+        self.stream_btn.setFixedWidth(120)
+        
+        # Create dropdown menu
+        self.stream_menu = QMenu(self)
+        self.snapshot_stream_action = self.stream_menu.addAction("Snapshot Stream")
+        self.snapshot_stream_action.triggered.connect(self.snapshot_stream)
+        
+        # Connect dropdown button to show menu
+        self.stream_dropdown_btn.clicked.connect(
+            lambda: self.stream_menu.exec_(self.stream_dropdown_btn.mapToGlobal(
+                self.stream_dropdown_btn.rect().bottomRight()))
+        )
+        
+        # Add the split button to the layout
+        top_control_layout.addWidget(self.stream_btn)
+        
+        # File menu button with dropdown
+        self.file_menu_btn = QPushButton("Open File")
+        self.file_menu_btn.setMaximumWidth(100)
+        top_control_layout.addWidget(self.file_menu_btn)
+        
+        # Create file menu
+        self.file_menu = QMenu(self)
+        self.open_video_action = self.file_menu.addAction("Open Video")
+        self.open_video_action.triggered.connect(self.open_file)
+        self.open_picture_action = self.file_menu.addAction("Open Picture")
+        self.open_picture_action.triggered.connect(self.open_picture)
+        
+        # Connect button to menu
+        self.file_menu_btn.setMenu(self.file_menu)
         
         # Add top control layout to main layout
         main_layout.addLayout(top_control_layout)
@@ -439,10 +491,25 @@ class YOLODetectionApp(QMainWindow):
         bottom_control_layout = QHBoxLayout()
         bottom_control_layout.setContentsMargins(0, 5, 0, 0)
         
+        # Model selection button
+        self.select_model_btn = QPushButton("Select Model")
+        self.select_model_btn.clicked.connect(self.select_model)
+        self.select_model_btn.setMaximumWidth(120)
+        bottom_control_layout.addWidget(self.select_model_btn)
+        
+        # Model path label
+        self.model_label = QLabel(f"Model: {self.model_path}")
+        self.model_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        bottom_control_layout.addWidget(self.model_label)
+        
+        # Add stretching space
+        bottom_control_layout.addStretch(1)
+        
         # Close Stream button
         self.close_stream_btn = QPushButton("Close Stream/Video")
         self.close_stream_btn.clicked.connect(self.close_stream)
         self.close_stream_btn.setEnabled(False)  # Initially disabled
+        self.close_stream_btn.setMaximumWidth(120)
         bottom_control_layout.addWidget(self.close_stream_btn)
         
         # Add bottom control layout to main layout
@@ -457,8 +524,8 @@ class YOLODetectionApp(QMainWindow):
         if not rtsp_url:
             return
             
-        # Close any existing stream
-        self.close_stream()
+        # Close any existing stream - but don't update UI
+        self.stop_current_thread()
         
         # Create and start a new video thread
         self.video_thread = VideoThread('rtsp', rtsp_url, self.model_path)
@@ -470,8 +537,6 @@ class YOLODetectionApp(QMainWindow):
         
         # Update UI state
         self.close_stream_btn.setEnabled(True)
-        self.open_stream_btn.setEnabled(False)
-        self.open_file_btn.setEnabled(False)
         
         # Hide placeholder and show display container
         self.no_content_label.setVisible(False)
@@ -483,6 +548,9 @@ class YOLODetectionApp(QMainWindow):
         self.speed_combo.setEnabled(False)
         self.position_slider.setEnabled(False)
         
+    def snapshot_stream(self):
+        return
+
     def open_file(self):
         # Open file dialog to select a video file
         file_path, _ = QFileDialog.getOpenFileName(
@@ -492,8 +560,8 @@ class YOLODetectionApp(QMainWindow):
         if not file_path:
             return
             
-        # Close any existing stream
-        self.close_stream()
+        # Close any existing stream - but don't update UI
+        self.stop_current_thread()
         
         # Create and start a new video thread
         self.video_thread = VideoThread('file', file_path, self.model_path)
@@ -506,8 +574,6 @@ class YOLODetectionApp(QMainWindow):
         
         # Update UI state
         self.close_stream_btn.setEnabled(True)
-        self.open_stream_btn.setEnabled(False)
-        self.open_file_btn.setEnabled(False)
         
         # Hide placeholder and show display container
         self.no_content_label.setVisible(False)
@@ -519,12 +585,16 @@ class YOLODetectionApp(QMainWindow):
         self.play_pause_btn.setText("Pause")
         self.speed_combo.setEnabled(True)
         self.position_slider.setEnabled(True)
-        
-    def close_stream(self):
-        # Stop and delete the video thread if it exists
+    
+    def stop_current_thread(self):
+        """Stop the current video thread without updating UI"""
         if self.video_thread and self.video_thread.isRunning():
             self.video_thread.stop()
             self.video_thread = None
+            
+    def close_stream(self):
+        # Stop and delete the video thread if it exists
+        self.stop_current_thread()
         
         # Hide display container and show placeholder instead
         self.display_container.setVisible(False)
@@ -532,8 +602,6 @@ class YOLODetectionApp(QMainWindow):
         
         # Update UI state
         self.close_stream_btn.setEnabled(False)
-        self.open_stream_btn.setEnabled(True)
-        self.open_file_btn.setEnabled(True)
         self.video_controls_widget.setVisible(False)
         self.position_label.setText("0 / 0")
         self.position_slider.setValue(0)
@@ -590,6 +658,176 @@ class YOLODetectionApp(QMainWindow):
                 if hasattr(self, 'was_playing') and self.was_playing:
                     self.video_thread.paused = False
                     self.play_pause_btn.setText("Pause")
+    
+    def select_model(self):
+        """Open file dialog to select a new YOLO model"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select YOLO Model", "", "Model Files (*.pt *.pth *.weights)"
+        )
+        
+        if not file_path:
+            return
+        
+        # Confirm changing model if there's an active stream/video
+        if self.video_thread and self.video_thread.isRunning():
+            reply = QMessageBox.question(
+                self, 
+                "Change Model",
+                "Changing the model will close the current stream/video. Continue?",
+                QMessageBox.Yes | QMessageBox.No, 
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.No:
+                return
+            
+            # Close the current stream/video
+            self.close_stream()
+        
+        # Update the model path
+        self.model_path = file_path
+        self.model_label.setText(f"Model: {self.model_path}")
+        
+        # Show a confirmation message
+        QMessageBox.information(
+            self,
+            "Model Changed",
+            f"YOLO model changed to: {self.model_path}",
+            QMessageBox.Ok
+        )
+        
+    def reset_to_default_model(self):
+        """Reset to the default model"""
+        if self.model_path != self.default_model_path:
+            # Close any current stream if running
+            if self.video_thread and self.video_thread.isRunning():
+                self.close_stream()
+                
+            # Reset to default model
+            self.model_path = self.default_model_path
+            self.model_label.setText(f"Model: {self.model_path}")
+            
+            # Show confirmation
+            QMessageBox.information(
+                self,
+                "Model Reset",
+                f"YOLO model reset to default: {self.model_path}",
+                QMessageBox.Ok
+            )
+            
+    def open_picture(self):
+        """Open and process a single image file"""
+        # Open file dialog to select an image
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Open Image File", "", "Image Files (*.jpg *.jpeg *.png *.bmp *.tiff)"
+        )
+        
+        if not file_path:
+            return
+            
+        # Close any existing stream or video
+        self.stop_current_thread()
+        
+        try:
+            # Read the image
+            image = cv2.imread(file_path)
+            if image is None:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    "Failed to load the image. The file may be corrupted or in an unsupported format.",
+                    QMessageBox.Ok
+                )
+                return
+                
+            # Process the image with YOLO
+            try:
+                model = YOLO(self.model_path)
+                results = model(image, verbose=False)
+                
+                if results and len(results) > 0:
+                    # Draw results on the image
+                    annotated_image = results[0].plot()
+                    
+                    # Add "Image Mode" label to the top left
+                    cv2.putText(
+                        annotated_image,
+                        "Image Mode",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 255, 0),
+                        2
+                    )
+                    
+                    # Update the display
+                    self.display_image(annotated_image)
+                else:
+                    # No detections found
+                    cv2.putText(
+                        image,
+                        "No detections found",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 255, 0),
+                        2
+                    )
+                    self.display_image(image)
+                    
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Processing Error",
+                    f"Error processing the image with YOLO: {str(e)}",
+                    QMessageBox.Ok
+                )
+                return
+                
+            # Update UI state
+            self.close_stream_btn.setEnabled(True)
+            
+            # Hide placeholder and show display container
+            self.no_content_label.setVisible(False)
+            self.display_container.setVisible(True)
+            
+            # Hide video controls
+            self.video_controls_widget.setVisible(False)
+            self.play_pause_btn.setEnabled(False)
+            self.speed_combo.setEnabled(False)
+            self.position_slider.setEnabled(False)
+            
+            # Remember we're in image mode
+            self.current_source_type = 'image'
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"An unexpected error occurred: {str(e)}",
+                QMessageBox.Ok
+            )
+            
+    def display_image(self, cv_img):
+        """Display an image on the UI"""
+        # Convert from OpenCV BGR format to RGB format
+        rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_image.shape
+        
+        # Convert to Qt format
+        bytes_per_line = ch * w
+        qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qt_image)
+        
+        # Scale to fit display area while maintaining aspect ratio
+        scaled_pixmap = pixmap.scaled(
+            self.display_label.size(), 
+            Qt.KeepAspectRatio, 
+            Qt.SmoothTransformation
+        )
+        
+        # Update the display label
+        self.display_label.setPixmap(scaled_pixmap)
         
     @pyqtSlot(np.ndarray)
     def update_image(self, cv_img):
@@ -638,7 +876,7 @@ class YOLODetectionApp(QMainWindow):
 
 
 if __name__ == "__main__":
-    # Path to your trained YOLO v11 model
+    # Path to your trained YOLO v11 model (default)
     yolo_model_path = r"best.pt"
     
     # Create and run the application
