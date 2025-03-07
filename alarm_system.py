@@ -17,10 +17,10 @@ class AlarmSystem(QObject):
         pygame.mixer.init()
         
         # Detection parameters
-        self.smoke_detection_required = 5  # 5 seconds
-        self.fire_detection_required = 2   # 2 seconds
+        self.smoke_detection_required = 3  # 3 seconds (reduced from 5)
+        self.fire_detection_required = 1   # 1 second (reduced from 2)
         self.error_margin = 1  # 1 second error margin
-        self.clear_required = 10  # 10 seconds clear before stopping alarm
+        self.clear_required = 3  # 3 seconds clear before stopping alarm
         
         # Detection state tracking
         self.smoke_detection_time = 0
@@ -34,6 +34,7 @@ class AlarmSystem(QObject):
         self.fire_alarm_active = False
         self.alarm_thread = None
         self.stop_alarm_thread = threading.Event()
+        self.pause_alarm = False
         
         # Sound parameters
         self.beep_interval = 1.0  # Start with 1 second between beeps
@@ -167,17 +168,23 @@ class AlarmSystem(QObject):
         current_interval = self.beep_interval
         
         while not self.stop_alarm_thread.is_set() and (self.smoke_alarm_active or self.fire_alarm_active):
-            # Play the beep sound
-            self.beep_sound.play()
+            # Only play sound if not paused
+            if not self.pause_alarm:
+                # Play the beep sound
+                self.beep_sound.play()
+                
+                # Gradually increase beep frequency (decrease interval)
+                current_interval = max(self.min_beep_interval, current_interval - self.beep_reduction_rate)
             
-            # Gradually increase beep frequency (decrease interval)
-            current_interval = max(self.min_beep_interval, current_interval - self.beep_reduction_rate)
-            
-            # Wait for the next beep
+            # Wait for the next beep (even when paused, to avoid CPU hogging)
             time.sleep(current_interval)
         
         # Reset beep interval for next alarm
         current_interval = self.beep_interval
+        
+    def set_pause(self, paused):
+        """Pause or resume the alarm sounds"""
+        self.pause_alarm = paused
     
     def stop(self):
         """Stop the alarm system"""

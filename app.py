@@ -716,6 +716,11 @@ class YOLODetectionApp(QMainWindow):
         
         event.accept()
 
+    def toggle_play_pause(self):
+        if self.video_thread and self.current_source_type == 'file':
+            paused = self.video_thread.toggle_pause()
+            self.play_pause_btn.setText("Play" if paused else "Pause")
+
 
 if __name__ == "__main__":
     # Path to your trained YOLO v11 model (default)

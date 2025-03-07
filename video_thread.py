@@ -311,3 +311,13 @@ class VideoThread(QThread):
         
     def seek(self, position):
         self.seek_position = position
+
+    def toggle_pause(self):
+        """Toggle pause state of the video and alarm system"""
+        self.paused = not self.paused
+        
+        # Also pause/resume alarm if alarm system is available
+        if self.alarm_system:
+            self.alarm_system.set_pause(self.paused)
+            
+        return self.paused
