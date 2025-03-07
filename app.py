@@ -723,7 +723,7 @@ class YOLODetectionApp(QMainWindow):
 
 
 if __name__ == "__main__":
-    # Path to your trained YOLO v11 model (default)
+    # default
     yolo_model_path = r"best.pt"
     
     # Create and run the application
