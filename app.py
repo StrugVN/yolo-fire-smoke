@@ -3,13 +3,14 @@ import cv2
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog,
-                            QSlider, QComboBox, QMessageBox, QMenu)
+                            QSlider, QComboBox, QMessageBox, QMenu, QFrame)
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, pyqtSlot
 from ultralytics import YOLO
 
 from video_thread import VideoThread
 from snapshot_thread import SnapshotThread
+from alarm_system import AlarmSystem
 
 class YOLODetectionApp(QMainWindow):
     def __init__(self, model_path):
@@ -20,6 +21,9 @@ class YOLODetectionApp(QMainWindow):
         self.current_source_type = None  # 'rtsp' or 'file'
         self.default_model_path = model_path  # Store the default model path
         self.snapshot_thread = None  # Add this
+        # Initialize alarm system
+        self.alarm_system = AlarmSystem()
+        self.alarm_system.alarm_status_signal.connect(self.update_alarm_status)
         
         self.init_ui()
         
@@ -114,6 +118,51 @@ class YOLODetectionApp(QMainWindow):
         self.display_container = QWidget()
         display_container_layout = QVBoxLayout(self.display_container)
         display_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create alarm indicator panel
+        self.alarm_panel = QFrame()
+        self.alarm_panel.setFrameShape(QFrame.StyledPanel)
+        self.alarm_panel.setMaximumHeight(60)
+        self.alarm_panel.setStyleSheet("background-color: #f0f0f0; border-radius: 5px;")
+
+        alarm_panel_layout = QHBoxLayout(self.alarm_panel)
+        alarm_panel_layout.setContentsMargins(10, 5, 10, 5)
+
+        # Create alarm indicators
+        self.smoke_indicator = QLabel("SMOKE")
+        self.smoke_indicator.setAlignment(Qt.AlignCenter)
+        self.smoke_indicator.setStyleSheet("""
+            background-color: #d0d0d0; 
+            color: #606060; 
+            border-radius: 5px; 
+            padding: 5px 15px; 
+            font-weight: bold;
+        """)
+
+        self.fire_indicator = QLabel("FIRE")
+        self.fire_indicator.setAlignment(Qt.AlignCenter)
+        self.fire_indicator.setStyleSheet("""
+            background-color: #d0d0d0; 
+            color: #606060; 
+            border-radius: 5px; 
+            padding: 5px 15px; 
+            font-weight: bold;
+        """)
+
+        # Add mute button
+        self.mute_btn = QPushButton("Mute Alarm")
+        self.mute_btn.clicked.connect(self.mute_alarm)
+        self.mute_btn.setEnabled(False)
+
+        # Add indicators to alarm panel
+        alarm_panel_layout.addWidget(QLabel("Alarm Status:"))
+        alarm_panel_layout.addWidget(self.smoke_indicator)
+        alarm_panel_layout.addWidget(self.fire_indicator)
+        alarm_panel_layout.addStretch(1)
+        alarm_panel_layout.addWidget(self.mute_btn)
+
+        # Add alarm panel to display container
+        display_container_layout.addWidget(self.alarm_panel)
         
         # Create display label for stream window within the container
         self.display_label = QLabel()
@@ -233,7 +282,7 @@ class YOLODetectionApp(QMainWindow):
         self.stop_current_thread()
         
         # Create and start a new video thread
-        self.video_thread = VideoThread('rtsp', rtsp_url, self.model_path)
+        self.video_thread = VideoThread('rtsp', rtsp_url, self.model_path, self.alarm_system)
         self.video_thread.change_pixmap_signal.connect(self.update_image)
         self.video_thread.start()
         
@@ -260,7 +309,7 @@ class YOLODetectionApp(QMainWindow):
 
         self.stop_current_thread()  # Stop any running stream
 
-        self.snapshot_thread = SnapshotThread(snapshot_url, self.model_path)
+        self.snapshot_thread = SnapshotThread(snapshot_url, self.model_path, self.alarm_system)
         self.snapshot_thread.change_pixmap_signal.connect(self.update_image)
         self.snapshot_thread.start()
 
@@ -287,7 +336,7 @@ class YOLODetectionApp(QMainWindow):
         self.stop_current_thread()
         
         # Create and start a new video thread
-        self.video_thread = VideoThread('file', file_path, self.model_path)
+        self.video_thread = VideoThread('file', file_path, self.model_path, self.alarm_system)
         self.video_thread.change_pixmap_signal.connect(self.update_image)
         self.video_thread.update_position_signal.connect(self.update_position)
         self.video_thread.start()
@@ -322,6 +371,10 @@ class YOLODetectionApp(QMainWindow):
     def close_stream(self):
         # Stop and delete the video thread if it exists
         self.stop_current_thread()
+
+        # Stop any active alarms
+        self.alarm_system.deactivate_alarms()
+        self.mute_btn.setEnabled(False)
         
         # Hide display container and show placeholder instead
         self.display_container.setVisible(False)
@@ -600,6 +653,68 @@ class YOLODetectionApp(QMainWindow):
             
             # Update position label (only if not being dragged)
             self.position_label.setText(f"{current_frame} / {total_frames}")
+
+    def update_alarm_status(self, alarm_type, is_active):
+        """Update the alarm status indicators"""
+        if alarm_type == "smoke":
+            if is_active:
+                self.smoke_indicator.setStyleSheet("""
+                    background-color: #ffd700; 
+                    color: #000000; 
+                    border-radius: 5px; 
+                    padding: 5px 15px; 
+                    font-weight: bold;
+                """)
+                self.mute_btn.setEnabled(True)
+            else:
+                self.smoke_indicator.setStyleSheet("""
+                    background-color: #d0d0d0; 
+                    color: #606060; 
+                    border-radius: 5px; 
+                    padding: 5px 15px; 
+                    font-weight: bold;
+                """)
+                # Only disable mute button if both alarms are inactive
+                if not self.alarm_system.fire_alarm_active:
+                    self.mute_btn.setEnabled(False)
+        
+        elif alarm_type == "fire":
+            if is_active:
+                self.fire_indicator.setStyleSheet("""
+                    background-color: #ff4500; 
+                    color: #ffffff; 
+                    border-radius: 5px; 
+                    padding: 5px 15px; 
+                    font-weight: bold;
+                """)
+                self.mute_btn.setEnabled(True)
+            else:
+                self.fire_indicator.setStyleSheet("""
+                    background-color: #d0d0d0; 
+                    color: #606060; 
+                    border-radius: 5px; 
+                    padding: 5px 15px; 
+                    font-weight: bold;
+                """)
+                # Only disable mute button if both alarms are inactive
+                if not self.alarm_system.smoke_alarm_active:
+                    self.mute_btn.setEnabled(False)
+
+    def mute_alarm(self):
+        """Mute the current alarm"""
+        self.alarm_system.deactivate_alarms()
+        self.mute_btn.setEnabled(False)
+
+    def closeEvent(self, event):
+        """Handle application close event"""
+        # Stop all threads and cleanup
+        self.stop_current_thread()
+        
+        # Stop alarm system
+        if hasattr(self, 'alarm_system'):
+            self.alarm_system.stop()
+        
+        event.accept()
 
 
 if __name__ == "__main__":

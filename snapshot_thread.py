@@ -9,7 +9,7 @@ from ultralytics import YOLO
 class SnapshotThread(QThread):
     change_pixmap_signal = pyqtSignal(np.ndarray)
     
-    def __init__(self, snapshot_url, model_path):
+    def __init__(self, snapshot_url, model_path, alarm_system=None):
         super().__init__()
         self.snapshot_url = snapshot_url
         self.model_path = model_path
@@ -17,6 +17,9 @@ class SnapshotThread(QThread):
         self.fps = 0
         self.frame_count = 0
         self.start_time = time.time()
+        
+        # Add alarm system reference
+        self.alarm_system = alarm_system
         
         # Load YOLO model
         try:
@@ -37,6 +40,11 @@ class SnapshotThread(QThread):
                     
                     if frame is not None:
                         results = self.model(frame, verbose=False)
+                        
+                        # Process alarm detection if alarm system is available
+                        if self.alarm_system and results:
+                            self.alarm_system.process_detections(results[0])
+                        
                         annotated_frame = results[0].plot() if results else frame
                         
                         # FPS calculation
@@ -68,4 +76,3 @@ class SnapshotThread(QThread):
     def stop(self):
         self.running = False
         self.wait()
-

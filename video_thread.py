@@ -10,7 +10,7 @@ class VideoThread(QThread):
     change_pixmap_signal = pyqtSignal(np.ndarray)
     update_position_signal = pyqtSignal(int, int)  # current_frame, total_frames
     
-    def __init__(self, source_type, source_path, model_path):
+    def __init__(self, source_type, source_path, model_path, alarm_system=None):
         super().__init__()
         self.source_type = source_type  # 'rtsp' or 'file'
         self.source_path = source_path
@@ -23,6 +23,9 @@ class VideoThread(QThread):
         self.seek_position = -1  # -1 means no seeking
         self.current_frame_position = 0
         self.total_frames = 0
+        
+        # Add alarm system reference
+        self.alarm_system = alarm_system
         
         # Load YOLO model
         try:
@@ -143,6 +146,10 @@ class VideoThread(QThread):
                 # Process with YOLO
                 results = self.model(frame, verbose=False)
                 
+                # Process alarm detection if alarm system is available
+                if self.alarm_system and results:
+                    self.alarm_system.process_detections(results[0])
+                
                 # Draw results
                 if results and len(results) > 0:
                     annotated_frame = results[0].plot()
@@ -249,6 +256,10 @@ class VideoThread(QThread):
                 # Process with YOLO
                 results = self.model(frame, verbose=False)
                 
+                # Process alarm detection if alarm system is available
+                if self.alarm_system and results:
+                    self.alarm_system.process_detections(results[0])
+                
                 # Draw results
                 if results and len(results) > 0:
                     annotated_frame = results[0].plot()
@@ -300,4 +311,3 @@ class VideoThread(QThread):
         
     def seek(self, position):
         self.seek_position = position
-
