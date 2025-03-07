@@ -94,7 +94,7 @@ class AlarmSystem(QObject):
                 if self.smoke_detection_time == 0:
                     self.smoke_detection_time = current_time
                 
-                # Check if we've reached detection threshold
+                # Check if detection threshold reached
                 elapsed = current_time - self.smoke_detection_time
                 if elapsed >= self.smoke_detection_required and not self.smoke_alarm_active:
                     self.activate_smoke_alarm()
@@ -120,7 +120,7 @@ class AlarmSystem(QObject):
             if (current_time - self.last_fire_time) > self.error_margin:
                 self.fire_detection_time = 0
         
-        # Check if we should stop the alarm
+        # Check to stop the alarm
         if (not has_smoke and not has_fire) and (self.smoke_alarm_active or self.fire_alarm_active):
             if self.last_clear_time == 0:
                 self.last_clear_time = current_time
