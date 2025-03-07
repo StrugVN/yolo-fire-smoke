@@ -1,6 +1,7 @@
 # Ignore build and dist folders
 build/
 dist/
+dist_2/
 best.pt
 
 # Ignore PyInstaller-generated .spec file

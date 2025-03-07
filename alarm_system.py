@@ -17,8 +17,8 @@ class AlarmSystem(QObject):
         pygame.mixer.init()
         
         # Detection parameters
-        self.smoke_detection_required = 3  # 3 seconds (reduced from 5)
-        self.fire_detection_required = 1   # 1 second (reduced from 2)
+        self.smoke_detection_required = 3  # 3 seconds
+        self.fire_detection_required = 1   # 1 second
         self.error_margin = 1  # 1 second error margin
         self.clear_required = 3  # 3 seconds clear before stopping alarm
         
@@ -37,8 +37,8 @@ class AlarmSystem(QObject):
         self.pause_alarm = False
         
         # Sound parameters
-        self.beep_interval = 1.0  # Start with 1 second between beeps
-        self.min_beep_interval = 0.2  # Fastest beep rate (5 beeps per second)
+        self.beep_interval = 2.0  # Start with 1 second between beeps
+        self.min_beep_interval = 0.5  # Fastest beep rate 
         self.beep_reduction_rate = 0.05  # How much to reduce interval each beep
         
         # Load sound
