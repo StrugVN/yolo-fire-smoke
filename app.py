@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 from ultralytics import YOLO
+import requests
 
 class VideoThread(QThread):
     change_pixmap_signal = pyqtSignal(np.ndarray)
@@ -307,6 +308,70 @@ class VideoThread(QThread):
         self.seek_position = position
 
 
+class SnapshotThread(QThread):
+    change_pixmap_signal = pyqtSignal(np.ndarray)
+    
+    def __init__(self, snapshot_url, model_path):
+        super().__init__()
+        self.snapshot_url = snapshot_url
+        self.model_path = model_path
+        self.running = True
+        self.fps = 0
+        self.frame_count = 0
+        self.start_time = time.time()
+        
+        # Load YOLO model
+        try:
+            self.model = YOLO(model_path)
+            print("Model loaded successfully!")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            self.running = False
+            return
+    
+    def run(self):
+        while self.running:
+            try:
+                response = requests.get(self.snapshot_url, timeout=2)
+                if response.status_code == 200:
+                    img_array = np.frombuffer(response.content, np.uint8)
+                    frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                    
+                    if frame is not None:
+                        results = self.model(frame, verbose=False)
+                        annotated_frame = results[0].plot() if results else frame
+                        
+                        # FPS calculation
+                        self.frame_count += 1
+                        elapsed_time = time.time() - self.start_time
+                        if elapsed_time >= 1.0:
+                            self.fps = self.frame_count / elapsed_time
+                            self.frame_count = 0
+                            self.start_time = time.time()
+                        
+                        # Display FPS on the frame
+                        cv2.putText(
+                            annotated_frame,
+                            f"FPS: {self.fps:.1f}",
+                            (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (0, 255, 0),
+                            2
+                        )
+                        
+                        self.change_pixmap_signal.emit(annotated_frame)
+                
+                time.sleep(0.2)  # 5 FPS
+            except Exception as e:
+                print(f"Snapshot stream error: {e}")
+                time.sleep(1)
+                
+    def stop(self):
+        self.running = False
+        self.wait()
+
+
 class YOLODetectionApp(QMainWindow):
     def __init__(self, model_path):
         super().__init__()
@@ -315,6 +380,7 @@ class YOLODetectionApp(QMainWindow):
         self.video_thread = None
         self.current_source_type = None  # 'rtsp' or 'file'
         self.default_model_path = model_path  # Store the default model path
+        self.snapshot_thread = None  # Add this
         
         self.init_ui()
         
@@ -375,7 +441,7 @@ class YOLODetectionApp(QMainWindow):
         
         # Create dropdown menu
         self.stream_menu = QMenu(self)
-        self.snapshot_stream_action = self.stream_menu.addAction("Snapshot Stream")
+        self.snapshot_stream_action = self.stream_menu.addAction("Webcapture Stream")
         self.snapshot_stream_action.triggered.connect(self.snapshot_stream)
         
         # Connect dropdown button to show menu
@@ -549,7 +615,25 @@ class YOLODetectionApp(QMainWindow):
         self.position_slider.setEnabled(False)
         
     def snapshot_stream(self):
-        return
+        snapshot_url = self.rtsp_input.text().strip()
+        if not snapshot_url:
+            return
+
+        self.stop_current_thread()  # Stop any running stream
+
+        self.snapshot_thread = SnapshotThread(snapshot_url, self.model_path)
+        self.snapshot_thread.change_pixmap_signal.connect(self.update_image)
+        self.snapshot_thread.start()
+
+        self.current_source_type = 'snapshot'
+        self.close_stream_btn.setEnabled(True)
+        self.no_content_label.setVisible(False)
+        self.display_container.setVisible(True)
+        self.video_controls_widget.setVisible(False)
+        self.play_pause_btn.setEnabled(False)
+        self.speed_combo.setEnabled(False)
+        self.position_slider.setEnabled(False)
+
 
     def open_file(self):
         # Open file dialog to select a video file
@@ -587,10 +671,14 @@ class YOLODetectionApp(QMainWindow):
         self.position_slider.setEnabled(True)
     
     def stop_current_thread(self):
-        """Stop the current video thread without updating UI"""
+        """Stop the current video or snapshot thread without updating UI"""
         if self.video_thread and self.video_thread.isRunning():
             self.video_thread.stop()
             self.video_thread = None
+        if self.snapshot_thread and self.snapshot_thread.isRunning():
+            self.snapshot_thread.stop()
+            self.snapshot_thread = None
+
             
     def close_stream(self):
         # Stop and delete the video thread if it exists
