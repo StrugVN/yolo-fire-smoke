@@ -20,10 +20,12 @@ class YOLODetectionApp(QMainWindow):
         self.video_thread = None
         self.current_source_type = None  # 'rtsp' or 'file'
         self.default_model_path = model_path  # Store the default model path
-        self.snapshot_thread = None  # Add this
+        self.snapshot_thread = None  
+        
         # Initialize alarm system
         self.alarm_system = AlarmSystem()
         self.alarm_system.alarm_status_signal.connect(self.update_alarm_status)
+        self.alarm_system.detection_count_signal.connect(self.update_detection_count)
         
         self.init_ui()
         
@@ -129,7 +131,7 @@ class YOLODetectionApp(QMainWindow):
         alarm_panel_layout.setContentsMargins(10, 5, 10, 5)
 
         # Create alarm indicators
-        self.smoke_indicator = QLabel("SMOKE")
+        self.smoke_indicator = QLabel("SMOKE (0)")
         self.smoke_indicator.setAlignment(Qt.AlignCenter)
         self.smoke_indicator.setStyleSheet("""
             background-color: #d0d0d0; 
@@ -139,7 +141,7 @@ class YOLODetectionApp(QMainWindow):
             font-weight: bold;
         """)
 
-        self.fire_indicator = QLabel("FIRE")
+        self.fire_indicator = QLabel("FIRE (0)")
         self.fire_indicator.setAlignment(Qt.AlignCenter)
         self.fire_indicator.setStyleSheet("""
             background-color: #d0d0d0; 
@@ -339,6 +341,7 @@ class YOLODetectionApp(QMainWindow):
         self.video_thread = VideoThread('file', file_path, self.model_path, self.alarm_system)
         self.video_thread.change_pixmap_signal.connect(self.update_image)
         self.video_thread.update_position_signal.connect(self.update_position)
+        self.video_thread.video_ended_signal.connect(self.handle_video_end)  # Connect to new signal
         self.video_thread.start()
         
         # Remember source type
@@ -375,6 +378,10 @@ class YOLODetectionApp(QMainWindow):
         # Stop any active alarms
         self.alarm_system.deactivate_alarms()
         self.mute_btn.setEnabled(False)
+        
+        # Reset detection counts in UI
+        self.update_detection_count("smoke", 0)
+        self.update_detection_count("fire", 0)
         
         # Hide display container and show placeholder instead
         self.display_container.setVisible(False)
@@ -413,6 +420,9 @@ class YOLODetectionApp(QMainWindow):
             position = self.position_slider.value()
             self.video_thread.seek(position)
             
+            # Re-enable the play button after seeking, regardless of video end state
+            self.play_pause_btn.setEnabled(True)
+            
             # If it was playing before, ensure it continues playing
             if hasattr(self, 'was_playing') and self.was_playing:
                 self.video_thread.paused = False
@@ -428,6 +438,9 @@ class YOLODetectionApp(QMainWindow):
             
             # If this is a direct click (not a drag operation) and not from auto-updates
             if not self.slider_is_being_dragged and position != self.video_thread.current_frame_position:
+                # Re-enable the play button after seeking, regardless of video end state
+                self.play_pause_btn.setEnabled(True)
+                
                 # Remember if the video was playing or paused
                 self.was_playing = not self.video_thread.paused
                 
@@ -657,6 +670,10 @@ class YOLODetectionApp(QMainWindow):
     def update_alarm_status(self, alarm_type, is_active):
         """Update the alarm status indicators"""
         if alarm_type == "smoke":
+            # Get current count from the label
+            current_text = self.smoke_indicator.text()
+            count_part = current_text[current_text.find("("):]
+            
             if is_active:
                 self.smoke_indicator.setStyleSheet("""
                     background-color: #ffd700; 
@@ -679,6 +696,10 @@ class YOLODetectionApp(QMainWindow):
                     self.mute_btn.setEnabled(False)
         
         elif alarm_type == "fire":
+            # Get current count from the label
+            current_text = self.fire_indicator.text()
+            count_part = current_text[current_text.find("("):]
+            
             if is_active:
                 self.fire_indicator.setStyleSheet("""
                     background-color: #ff4500; 
@@ -716,10 +737,21 @@ class YOLODetectionApp(QMainWindow):
         
         event.accept()
 
-    def toggle_play_pause(self):
-        if self.video_thread and self.current_source_type == 'file':
-            paused = self.video_thread.toggle_pause()
-            self.play_pause_btn.setText("Play" if paused else "Pause")
+    def update_detection_count(self, detection_type, count):
+        """Update the detection count in the UI"""
+        if detection_type == "smoke":
+            self.smoke_indicator.setText(f"SMOKE ({count})")
+        elif detection_type == "fire":
+            self.fire_indicator.setText(f"FIRE ({count})")
+
+    def handle_video_end(self):
+        """Handle the video ended event"""
+        # Simply click the mute alarm button if it's enabled
+        if self.mute_btn.isEnabled():
+            self.mute_alarm()
+            
+        # Update UI to show video has ended
+        self.play_pause_btn.setText("Play")
 
 
 if __name__ == "__main__":

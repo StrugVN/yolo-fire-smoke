@@ -9,6 +9,8 @@ from ultralytics import YOLO
 class VideoThread(QThread):
     change_pixmap_signal = pyqtSignal(np.ndarray)
     update_position_signal = pyqtSignal(int, int)  # current_frame, total_frames
+    video_ended_signal = pyqtSignal()  # New signal to indicate video has ended
+    video_reached_end = False  # New flag to track if video reached end
     
     def __init__(self, source_type, source_path, model_path, alarm_system=None):
         super().__init__()
@@ -23,6 +25,7 @@ class VideoThread(QThread):
         self.seek_position = -1  # -1 means no seeking
         self.current_frame_position = 0
         self.total_frames = 0
+        self.video_reached_end = False  # New flag to track if video reached end
         
         # Add alarm system reference
         self.alarm_system = alarm_system
@@ -58,6 +61,9 @@ class VideoThread(QThread):
                 reader_thread.join(timeout=1.0)
                 
         elif self.source_type == 'file':
+            # Reset the end flag when starting/restarting
+            self.video_reached_end = False
+            
             # Process video file directly
             self.process_video_file()
     
@@ -213,10 +219,17 @@ class VideoThread(QThread):
                 self.current_frame_position = self.seek_position
                 self.seek_position = -1
                 last_frame_time = time.time()  # Reset timing after seeking
+                # Reset end flag when seeking
+                self.video_reached_end = False
             
             # Handle pause
             if self.paused:
                 time.sleep(0.05)  # Reduce CPU usage while paused
+                continue
+                
+            # Skip processing if we've reached the end
+            if self.video_reached_end:
+                time.sleep(0.1)  # Reduce CPU usage when at end
                 continue
                 
             # Timing control for playback speed
@@ -233,9 +246,11 @@ class VideoThread(QThread):
             # Read next frame
             ret, frame = cap.read()
             if not ret:
-                # If we reach the end, emit the last position update and break
+                # If we reach the end, emit the last position update and video ended signal
                 self.update_position_signal.emit(self.current_frame_position, self.total_frames)
-                break
+                self.video_reached_end = True
+                self.video_ended_signal.emit()  # Signal that video has ended
+                continue  # Don't break - allow seeking back
             
             # Update timing for next frame
             last_frame_time = time.time()
@@ -303,17 +318,11 @@ class VideoThread(QThread):
         self.wait()
         
     def toggle_pause(self):
-        self.paused = not self.paused
-        return self.paused
-        
-    def set_speed(self, speed):
-        self.playback_speed = speed
-        
-    def seek(self, position):
-        self.seek_position = position
-
-    def toggle_pause(self):
         """Toggle pause state of the video and alarm system"""
+        # If at the end and resuming, seek back to start playing
+        if self.video_reached_end and self.paused:
+            self.video_reached_end = False
+            
         self.paused = not self.paused
         
         # Also pause/resume alarm if alarm system is available
@@ -321,3 +330,9 @@ class VideoThread(QThread):
             self.alarm_system.set_pause(self.paused)
             
         return self.paused
+        
+    def set_speed(self, speed):
+        self.playback_speed = speed
+        
+    def seek(self, position):
+        self.seek_position = position

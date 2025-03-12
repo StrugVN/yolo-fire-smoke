@@ -10,6 +10,7 @@ class AlarmSystem(QObject):
     Handles detection sequences and alarm sounds
     """
     alarm_status_signal = pyqtSignal(str, bool)  # type, is_active
+    detection_count_signal = pyqtSignal(str, int)  # type, count
     
     def __init__(self):
         super().__init__()
@@ -36,9 +37,13 @@ class AlarmSystem(QObject):
         self.stop_alarm_thread = threading.Event()
         self.pause_alarm = False
         
+        # Detection counts
+        self.smoke_count = 0
+        self.fire_count = 0
+        
         # Sound parameters
-        self.beep_interval = 2.0  # Start with 1 second between beeps
-        self.min_beep_interval = 0.5  # Fastest beep rate 
+        self.beep_interval = 1.0  # Start with x second between beeps
+        self.min_beep_interval = 0.3  # Fastest beep rate 
         self.beep_reduction_rate = 0.05  # How much to reduce interval each beep
         
         # Load sound
@@ -74,6 +79,10 @@ class AlarmSystem(QObject):
         has_smoke = False
         has_fire = False
         
+        # Reset detection counts for this frame
+        current_smoke_count = 0
+        current_fire_count = 0
+        
         # Check for smoke and fire in the detections
         if hasattr(result, 'boxes') and result.boxes is not None:
             boxes = result.boxes
@@ -84,8 +93,19 @@ class AlarmSystem(QObject):
                 class_id = int(class_id)  # Convert tensor to int if needed
                 if class_id == 0:  # Assuming class 0 is fire
                     has_fire = True
+                    current_fire_count += 1
                 elif class_id == 1:  # Assuming class 1 is smoke
                     has_smoke = True
+                    current_smoke_count += 1
+        
+        # Update detection counts and emit signals if changed
+        if current_smoke_count != self.smoke_count:
+            self.smoke_count = current_smoke_count
+            self.detection_count_signal.emit("smoke", self.smoke_count)
+            
+        if current_fire_count != self.fire_count:
+            self.fire_count = current_fire_count
+            self.detection_count_signal.emit("fire", self.fire_count)
         
         # Process smoke detection
         if has_smoke:
