@@ -31,7 +31,7 @@ class YOLODetectionApp(QMainWindow):
         
     def init_ui(self):
         # Set window properties
-        self.setWindowTitle("Fire warning - Yolo 11 demo")
+        self.setWindowTitle("Fire detection system")
         self.setGeometry(100, 100, 900, 600)
         
         # Create central widget and main layout
@@ -86,7 +86,7 @@ class YOLODetectionApp(QMainWindow):
         
         # Create dropdown menu
         self.stream_menu = QMenu(self)
-        self.snapshot_stream_action = self.stream_menu.addAction("Webcapture Stream")
+        self.snapshot_stream_action = self.stream_menu.addAction("MJPEG Stream")
         self.snapshot_stream_action.triggered.connect(self.snapshot_stream)
         
         # Connect dropdown button to show menu
