@@ -8,8 +8,9 @@ from ultralytics import YOLO
 
 class SnapshotThread(QThread):
     change_pixmap_signal = pyqtSignal(np.ndarray)
+    danger_update_signal = pyqtSignal(object)  # New signal for danger meter updates
     
-    def __init__(self, snapshot_url, model_path, alarm_system=None):
+    def __init__(self, snapshot_url, model_path, alarm_system=None, danger_meter=None):
         super().__init__()
         self.snapshot_url = snapshot_url
         self.model_path = model_path
@@ -20,6 +21,9 @@ class SnapshotThread(QThread):
         
         # Add alarm system reference
         self.alarm_system = alarm_system
+        
+        # Add danger meter reference
+        self.danger_meter = danger_meter
         
         # Load YOLO model
         try:
@@ -45,6 +49,11 @@ class SnapshotThread(QThread):
                         if self.alarm_system and results:
                             self.alarm_system.process_detections(results[0])
                         
+                        # Calculate danger level if danger meter is available
+                        if self.danger_meter and results:
+                            danger_level = self.danger_meter.calculate_danger(results[0])
+                            self.danger_update_signal.emit(results[0])
+                        
                         annotated_frame = results[0].plot() if results else frame
                         
                         # FPS calculation
@@ -65,6 +74,19 @@ class SnapshotThread(QThread):
                             (0, 255, 0),
                             2
                         )
+                        
+                        # Add coverage info if danger meter exists
+                        if self.danger_meter:
+                            coverage_text = self.danger_meter.get_coverage_text()
+                            cv2.putText(
+                                annotated_frame,
+                                coverage_text,
+                                (20, 80),  # Position below FPS
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                1,
+                                (0, 255, 255),  # Yellow for visibility
+                                2
+                            )
                         
                         self.change_pixmap_signal.emit(annotated_frame)
                 

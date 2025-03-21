@@ -11,6 +11,7 @@ from ultralytics import YOLO
 from video_thread import VideoThread
 from snapshot_thread import SnapshotThread
 from alarm_system import AlarmSystem
+from danger_meter import DangerMeter
 
 class YOLODetectionApp(QMainWindow):
     def __init__(self, model_path):
@@ -120,6 +121,10 @@ class YOLODetectionApp(QMainWindow):
         self.display_container = QWidget()
         display_container_layout = QVBoxLayout(self.display_container)
         display_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create and add the danger meter
+        self.danger_meter = DangerMeter(self.display_container)
+        display_container_layout.addWidget(self.danger_meter.container)
 
         # Create alarm indicator panel
         self.alarm_panel = QFrame()
@@ -284,8 +289,9 @@ class YOLODetectionApp(QMainWindow):
         self.stop_current_thread()
         
         # Create and start a new video thread
-        self.video_thread = VideoThread('rtsp', rtsp_url, self.model_path, self.alarm_system)
+        self.video_thread = VideoThread('rtsp', rtsp_url, self.model_path, self.alarm_system, self.danger_meter)
         self.video_thread.change_pixmap_signal.connect(self.update_image)
+        self.video_thread.danger_update_signal.connect(self.update_danger_meter)
         self.video_thread.start()
         
         # Remember source type
@@ -311,8 +317,9 @@ class YOLODetectionApp(QMainWindow):
 
         self.stop_current_thread()  # Stop any running stream
 
-        self.snapshot_thread = SnapshotThread(snapshot_url, self.model_path, self.alarm_system)
+        self.snapshot_thread = SnapshotThread(snapshot_url, self.model_path, self.alarm_system, self.danger_meter)
         self.snapshot_thread.change_pixmap_signal.connect(self.update_image)
+        self.snapshot_thread.danger_update_signal.connect(self.update_danger_meter)
         self.snapshot_thread.start()
 
         self.current_source_type = 'snapshot'
@@ -338,10 +345,11 @@ class YOLODetectionApp(QMainWindow):
         self.stop_current_thread()
         
         # Create and start a new video thread
-        self.video_thread = VideoThread('file', file_path, self.model_path, self.alarm_system)
+        self.video_thread = VideoThread('file', file_path, self.model_path, self.alarm_system, self.danger_meter)
         self.video_thread.change_pixmap_signal.connect(self.update_image)
         self.video_thread.update_position_signal.connect(self.update_position)
         self.video_thread.video_ended_signal.connect(self.handle_video_end)  # Connect to new signal
+        self.video_thread.danger_update_signal.connect(self.update_danger_meter)
         self.video_thread.start()
         
         # Remember source type
@@ -392,6 +400,9 @@ class YOLODetectionApp(QMainWindow):
         self.video_controls_widget.setVisible(False)
         self.position_label.setText("0 / 0")
         self.position_slider.setValue(0)
+
+        # Reset danger meter
+        self.danger_meter.update_meter(0)
         
         # Reset source type
         self.current_source_type = None
@@ -539,6 +550,8 @@ class YOLODetectionApp(QMainWindow):
                 results = model(image, verbose=False)
                 
                 if results and len(results) > 0:
+                    self.update_danger_meter(results[0])
+
                     # Draw results on the image
                     annotated_image = results[0].plot()
                     
@@ -752,6 +765,10 @@ class YOLODetectionApp(QMainWindow):
             
         # Update UI to show video has ended
         self.play_pause_btn.setText("Play")
+
+    def update_danger_meter(self, result):
+        """Update the danger meter based on YOLO detection result"""
+        self.danger_meter.update_meter(self.danger_meter.calculate_danger(result))
 
 
 if __name__ == "__main__":

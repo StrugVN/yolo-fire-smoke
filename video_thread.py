@@ -9,10 +9,10 @@ from ultralytics import YOLO
 class VideoThread(QThread):
     change_pixmap_signal = pyqtSignal(np.ndarray)
     update_position_signal = pyqtSignal(int, int)  # current_frame, total_frames
-    video_ended_signal = pyqtSignal()  # New signal to indicate video has ended
-    video_reached_end = False  # New flag to track if video reached end
+    video_ended_signal = pyqtSignal()  # Signal to indicate video has ended
+    danger_update_signal = pyqtSignal(object)  # New signal for danger meter updates
     
-    def __init__(self, source_type, source_path, model_path, alarm_system=None):
+    def __init__(self, source_type, source_path, model_path, alarm_system=None, danger_meter=None):
         super().__init__()
         self.source_type = source_type  # 'rtsp' or 'file'
         self.source_path = source_path
@@ -25,10 +25,13 @@ class VideoThread(QThread):
         self.seek_position = -1  # -1 means no seeking
         self.current_frame_position = 0
         self.total_frames = 0
-        self.video_reached_end = False  # New flag to track if video reached end
+        self.video_reached_end = False  # Flag to track if video reached end
         
         # Add alarm system reference
         self.alarm_system = alarm_system
+        
+        # Add danger meter reference
+        self.danger_meter = danger_meter
         
         # Load YOLO model
         try:
@@ -156,6 +159,11 @@ class VideoThread(QThread):
                 if self.alarm_system and results:
                     self.alarm_system.process_detections(results[0])
                 
+                # Calculate danger level if danger meter is available
+                if self.danger_meter and results:
+                    danger_level = self.danger_meter.calculate_danger(results[0])
+                    self.danger_update_signal.emit(results[0])
+                
                 # Draw results
                 if results and len(results) > 0:
                     annotated_frame = results[0].plot()
@@ -171,6 +179,19 @@ class VideoThread(QThread):
                         2
                     )
                     
+                    # Add coverage info if danger meter exists
+                    if self.danger_meter:
+                        coverage_text = self.danger_meter.get_coverage_text()
+                        cv2.putText(
+                            annotated_frame,
+                            coverage_text,
+                            (20, 80),  # Position below FPS
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (0, 255, 255),  # Yellow for visibility
+                            2
+                        )
+                    
                     self.change_pixmap_signal.emit(annotated_frame)
                 else:
                     # Add FPS to original frame
@@ -183,6 +204,19 @@ class VideoThread(QThread):
                         (0, 255, 0),
                         2
                     )
+                    
+                    # Add coverage info if danger meter exists (even if no detections)
+                    if self.danger_meter:
+                        coverage_text = self.danger_meter.get_coverage_text()
+                        cv2.putText(
+                            frame,
+                            coverage_text,
+                            (20, 80),  # Position below FPS
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (0, 255, 255),  # Yellow for visibility
+                            2
+                        )
                     
                     self.change_pixmap_signal.emit(frame)
                 
@@ -275,6 +309,11 @@ class VideoThread(QThread):
                 if self.alarm_system and results:
                     self.alarm_system.process_detections(results[0])
                 
+                # Calculate danger level if danger meter is available
+                if self.danger_meter and results:
+                    danger_level = self.danger_meter.calculate_danger(results[0])
+                    self.danger_update_signal.emit(results[0])
+                
                 # Draw results
                 if results and len(results) > 0:
                     annotated_frame = results[0].plot()
@@ -290,6 +329,19 @@ class VideoThread(QThread):
                         2
                     )
                     
+                    # Add coverage info if danger meter exists
+                    if self.danger_meter:
+                        coverage_text = self.danger_meter.get_coverage_text()
+                        cv2.putText(
+                            annotated_frame,
+                            coverage_text,
+                            (20, 80),  # Position below FPS
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8,
+                            (0, 255, 255),  # Yellow for visibility
+                            2
+                        )
+                    
                     self.change_pixmap_signal.emit(annotated_frame)
                 else:
                     # Add FPS to original frame
@@ -302,6 +354,19 @@ class VideoThread(QThread):
                         (0, 255, 0),
                         2
                     )
+                    
+                    # Add coverage info if danger meter exists (even if no detections)
+                    if self.danger_meter:
+                        coverage_text = self.danger_meter.get_coverage_text()
+                        cv2.putText(
+                            frame,
+                            coverage_text,
+                            (20, 80),  # Position below FPS
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8,
+                            (0, 255, 255),  # Yellow for visibility
+                            2
+                        )
                     
                     self.change_pixmap_signal.emit(frame)
                     
