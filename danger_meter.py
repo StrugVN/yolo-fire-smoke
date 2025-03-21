@@ -2,6 +2,7 @@ import time
 from PyQt5.QtWidgets import QProgressBar, QHBoxLayout, QLabel, QFrame
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QPalette
+import math
 
 class DangerMeter:
     """
@@ -55,6 +56,14 @@ class DangerMeter:
         self.smoke_max_duration = 10.0
         self.error_margin = 1.0
         self.clear_required = 3.0
+
+        self.last_risk_level = 0
+        self.last_risk_time = 0
+        self.highest_recent_risk = 0
+        self.decay_start_time = 0
+        self.decay_start_value = 0
+        self.decay_duration = 6.0  
+        self.decay_drop_threshold = 4.0
         
         # Initialize the meter
         self.update_meter(0)
@@ -64,7 +73,7 @@ class DangerMeter:
 
     def calculate_danger(self, results):
         """
-        Calculate the danger level based on YOLO detection results and detection duration.
+        Calculate the danger level based on YOLO detection results, accounting for overlapping boxes.
         
         Args:
             results: YOLO detection results
@@ -80,82 +89,84 @@ class DangerMeter:
         if not results or not hasattr(results, 'boxes') or results.boxes is None:
             self.fire_coverage = 0
             self.smoke_coverage = 0
-            # Handle clearance if there's no detections
             self._handle_clearance(current_time)
             return self._calculate_final_danger_level()
         
         # Get image dimensions
         img_height, img_width = results.orig_shape
-        total_screen_area = img_height * img_width
+        total_screen_area = max(1, img_height * img_width)
         
-        # Initialize areas
-        fire_area = 0
-        smoke_area = 0
+        # Create mask images for fire and smoke to account for overlaps
+        import numpy as np
+        fire_mask = np.zeros((img_height, img_width), dtype=np.uint8)
+        smoke_mask = np.zeros((img_height, img_width), dtype=np.uint8)
         
         # Extract bounding boxes and classes
         boxes = results.boxes
         if len(boxes) == 0:
             self.fire_coverage = 0
             self.smoke_coverage = 0
-            # Handle clearance if there's no detections
             self._handle_clearance(current_time)
             return self._calculate_final_danger_level()
-            
+        
         # Process each detection
         for i in range(len(boxes)):
             # Get box coordinates and class
-            box = boxes[i].xyxy.cpu().numpy()[0] if hasattr(boxes[i], 'xyxy') else boxes[i].cpu().numpy()
+            box = boxes[i].xyxy[0].cpu().numpy() if hasattr(boxes[i], 'xyxy') else boxes[i].cpu().numpy()
             cls = int(boxes[i].cls.cpu().numpy()[0]) if hasattr(boxes[i], 'cls') else 0
             
-            # Calculate box area
-            x1, y1, x2, y2 = box[:4]
-            box_area = (x2 - x1) * (y2 - y1)
+            # Get integer coordinates for mask
+            x1, y1, x2, y2 = [int(coord) for coord in box[:4]]
             
-            # Add to respective area based on class
+            # Keep coordinates within image bounds
+            x1 = max(0, min(x1, img_width-1))
+            x2 = max(0, min(x2, img_width-1))
+            y1 = max(0, min(y1, img_height-1))
+            y2 = max(0, min(y2, img_height-1))
+            
+            # Add to appropriate mask
             if cls == 0:  # Fire class
-                fire_area += box_area
+                fire_mask[y1:y2, x1:x2] = 1
                 has_fire = True
             elif cls == 1:  # Smoke class
-                smoke_area += box_area
+                smoke_mask[y1:y2, x1:x2] = 1
                 has_smoke = True
         
-        # Calculate individual coverage percentages
+        # Calculate areas from masks (this accounts for overlaps)
+        fire_area = np.sum(fire_mask)
+        smoke_area = np.sum(smoke_mask)
+        
+        # Calculate coverage percentages
         self.fire_coverage = (fire_area / total_screen_area) * 100
         self.smoke_coverage = (smoke_area / total_screen_area) * 100
         
-        # Process fire duration
+        # Process duration factors as before
         if has_fire:
             if self.first_fire_time == 0 or (current_time - self.last_fire_time) > self.error_margin:
                 self.first_fire_time = current_time
             
-            # Calculate duration factor (0-100)
             elapsed = current_time - self.first_fire_time
             self.fire_duration_factor = min(100, (elapsed / self.fire_max_duration) * 100)
             self.last_fire_time = current_time
         elif (current_time - self.last_fire_time) > self.error_margin:
-            # Reset if no fire detected beyond error margin
             self.first_fire_time = 0
         
-        # Process smoke duration
         if has_smoke:
             if self.first_smoke_time == 0 or (current_time - self.last_smoke_time) > self.error_margin:
                 self.first_smoke_time = current_time
             
-            # Calculate duration factor (0-100)
             elapsed = current_time - self.first_smoke_time
             self.smoke_duration_factor = min(100, (elapsed / self.smoke_max_duration) * 100)
             self.last_smoke_time = current_time
         elif (current_time - self.last_smoke_time) > self.error_margin:
-            # Reset if no smoke detected beyond error margin
             self.first_smoke_time = 0
-            
+        
         # Handle clearance if neither fire nor smoke is detected
         if not has_fire and not has_smoke:
             self._handle_clearance(current_time)
         else:
             self.last_clear_time = 0
-            
-        # Calculate final danger level
+        
         return self._calculate_final_danger_level()
         
     def _handle_clearance(self, current_time):
@@ -168,20 +179,97 @@ class DangerMeter:
             self.smoke_duration_factor = max(0, self.smoke_duration_factor - 20)  # Gradually reduce
             
     def _calculate_final_danger_level(self):
-        """Calculate final danger level combining area coverage and duration factors"""
-        # Combined area coverage
-        combined_coverage = min(100, self.fire_coverage + self.smoke_coverage)
+        """
+        Calculate final danger level with improved decay mechanism
+        """
+        current_time = time.time()
         
-        # Duration increases danger - weight fire duration higher than smoke
-        duration_factor = (self.fire_duration_factor * 0.7 + self.smoke_duration_factor * 0.3) / 100
+        # Non-linear scaling for fire and smoke (unchanged)
+        if self.fire_coverage > 0:
+            a = 70 / (math.log(11) - math.log(2))
+            b = 10 - a * math.log(2)
+            fire_risk = min(100, a * math.log(self.fire_coverage + 1) + b)
+            has_fire = True
+        else:
+            fire_risk = 0
+            has_fire = False
         
-        # Final danger level formula:
-        # Base level from combined coverage, plus up to 50% more from duration
-        # This ensures area coverage remains the primary factor but duration adds significant weight
-        danger_bonus = min(50, combined_coverage * duration_factor)
-        final_danger = min(100, combined_coverage + danger_bonus)
+        if self.smoke_coverage > 0:
+            a = 35 / (math.log(11) - math.log(2))
+            b = 5 - a * math.log(2)
+            smoke_risk = min(100, a * math.log(self.smoke_coverage + 1) + b)
+            has_smoke = True
+        else:
+            smoke_risk = 0
+            has_smoke = False
         
-        return final_danger
+        # Calculate base risk and apply growth factor (unchanged)
+        base_risk = max(fire_risk, smoke_risk)
+        
+        fire_growth_rate = self.fire_duration_factor / 100
+        smoke_growth_rate = self.smoke_duration_factor / 100
+        
+        if fire_growth_rate <= 0.5:
+            fire_growth_effect = fire_growth_rate * 1.5
+        else:
+            fire_growth_effect = 0.75 + (fire_growth_rate - 0.5) * 0.5
+        
+        if smoke_growth_rate <= 0.5:
+            smoke_growth_effect = smoke_growth_rate * 1.5
+        else:
+            smoke_growth_effect = 0.75 + (smoke_growth_rate - 0.5) * 0.5
+        
+        growth_multiplier = 1.0 + max(fire_growth_effect, smoke_growth_effect)
+        current_calculated_risk = min(100, base_risk * growth_multiplier)
+        
+        # IMPROVED DECAY LOGIC
+        # Check if current risk is significantly lower than previous (risk drop)
+        is_significant_drop = (self.last_risk_level - current_calculated_risk) > 5.0  # 5% threshold
+        
+        # Case 1: Risk is increasing or stable
+        if current_calculated_risk >= self.last_risk_level:
+            # Use the new higher value
+            final_risk = current_calculated_risk
+            # Reset decay since risk is increasing
+            self.decay_start_time = 0
+            self.decay_start_value = 0
+        
+        # Case 2: Risk dropped significantly and decay not started yet
+        elif is_significant_drop and self.decay_start_time == 0:
+            # Start a new decay from the last risk level
+            self.decay_start_time = current_time
+            self.decay_start_value = self.last_risk_level
+            final_risk = self.last_risk_level  # Start from previous value
+        
+        # Case 3: Already in decay process
+        elif self.decay_start_time > 0:
+            elapsed_decay_time = current_time - self.decay_start_time
+            
+            if elapsed_decay_time < self.decay_drop_threshold:
+                # Linear decay for first threshold seconds
+                initial_decay_factor = 1.0 - (elapsed_decay_time / self.decay_duration)
+                decay_risk = self.decay_start_value * initial_decay_factor
+                # Take the max of decay risk and current risk
+                final_risk = max(decay_risk, current_calculated_risk)
+            elif elapsed_decay_time < self.decay_duration:
+                # After threshold, use current risk
+                final_risk = current_calculated_risk
+                # If we've reached current risk level, end decay
+                if abs(final_risk - current_calculated_risk) < 1.0:
+                    self.decay_start_time = 0
+            else:
+                # Decay complete
+                final_risk = current_calculated_risk
+                self.decay_start_time = 0
+        
+        # Case 4: Small risk decrease, not worth starting decay
+        else:
+            final_risk = current_calculated_risk
+        
+        # Update last risk level for next iteration
+        self.last_risk_level = final_risk
+        
+        return final_risk
         
     def update_meter(self, danger_level):
         """
@@ -196,27 +284,32 @@ class DangerMeter:
         # Set color and status based on danger level
         if danger_level < 20:
             color = QColor(0, 255, 0)  # Green - Safe
-            status = "Safe"
+            status = "Caution"
             text_color = "black"
         elif danger_level < 40:
             color = QColor(150, 255, 0)  # Light Green-Yellow - Low
-            status = "Low Risk"
+            status = "Hazardous"
             text_color = "black"
         elif danger_level < 60:
             color = QColor(255, 255, 0)  # Yellow - Moderate
-            status = "Moderate"
+            status = "Critical"
             text_color = "black"
         elif danger_level < 80:
             color = QColor(255, 150, 0)  # Orange - High
-            status = "High Risk"
+            status = "Danger!"
             text_color = "white"
         else:
             color = QColor(255, 0, 0)  # Red - Extreme
-            status = "EXTREME DANGER"
+            status = "DISASTEROUS!"
             text_color = "white"
         
         # Update the custom progress bar
-        self.danger_bar.setStatusText(status)
+        # If you want to include the percentage in the status text:
+        # self.danger_bar.setStatusText(f"{status} ({int(danger_level)}%)")
+        
+        # If you want to remove percentage completely:
+        self.danger_bar.setStatusText(f"{status}")
+        
         self.danger_bar.setStatusColor(text_color)
         self.danger_bar.setBarColor(color)
         
@@ -251,7 +344,8 @@ class CustomProgressBar(QProgressBar):
         # Convert QColor to CSS color string
         css_color = f"rgb({color.red()}, {color.green()}, {color.blue()})"
         
-        # Apply stylesheet directly - this is more reliable for changing colors
+        # Apply stylesheet directly - note the "text-align: right" is set to none
+        # to prevent the percentage from showing on the right
         self.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid #888;
@@ -263,6 +357,10 @@ class CustomProgressBar(QProgressBar):
                 background-color: {css_color};
             }}
         """)
+        
+        # This is the key line - make sure default text display is disabled
+        self.setTextVisible(False)
+        
         self.update()
         
     def paintEvent(self, event):
