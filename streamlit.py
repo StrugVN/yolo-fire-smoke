@@ -35,17 +35,38 @@ except:
     has_sound = False
     st.warning("Sound initialization failed - alarm sounds will be unavailable")
 
-# Initialize YOLO model
+# Make the model loading more robust to handle file paths
 @st.cache_resource
 def load_model(model_path):
     """Load YOLO model with caching"""
     try:
+        import os
         from ultralytics import YOLO
+        
+        # Check if file exists
+        if not os.path.isfile(model_path):
+            st.error(f"Model file not found: {model_path}")
+            return None
+            
+        # Check if it's a valid model file
+        valid_extensions = ['.pt', '.pth', '.weights']
+        if not any(model_path.endswith(ext) for ext in valid_extensions):
+            st.warning(f"Model file may not be a valid YOLO model: {model_path}")
+        
+        # Try to load the model
         model = YOLO(model_path)
+        st.success(f"YOLO model loaded successfully: {model_path}")
         return model
     except Exception as e:
-        st.error(f"Error loading model: {e}")
+        st.error(f"Error loading model: {str(e)}")
         return None
+
+# Ensure YOLO package is imported at the top
+try:
+    from ultralytics import YOLO
+except ImportError:
+    st.error("Error: ultralytics package not found. Please install it with 'pip install ultralytics'")
+    st.stop()
 
 # Danger calculation logic (simplified from original DangerMeter class)
 def calculate_danger(results, img_width, img_height):
@@ -349,7 +370,7 @@ with col2:
             st.session_state.alarm_muted = True
             # In a real app, you'd stop the sound here
 
-# Handle button clicks
+# Fix the YOLO model loading and error handling
 if start_button:
     # Clear any previous capture
     if st.session_state.capture_thread and st.session_state.capture_thread.is_alive():
@@ -361,9 +382,11 @@ if start_button:
     
     # Load model if needed
     if st.session_state.model is None:
-        st.session_state.model = load_model(st.session_state.model_path)
+        with st.spinner("Loading YOLO model..."):
+            st.session_state.model = load_model(st.session_state.model_path)
+        
         if st.session_state.model is None:
-            st.error("Failed to load YOLO model")
+            st.error(f"Failed to load YOLO model from {st.session_state.model_path}. Please check if the file exists and is a valid YOLO model.")
             st.stop()
     
     # Handle different source types
@@ -389,26 +412,36 @@ if start_button:
         st.session_state.capture_thread.start()
         st.session_state.started = True
         
+# Add better error handling for video file loading
     elif source_type == "Video File" and 'uploaded_video' in locals() and uploaded_video is not None:
         # Save uploaded video to temp file
-        st.session_state.current_source_type = "video"
-        temp_video = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        temp_video.write(uploaded_video.getvalue())
-        temp_video.close()
-        
-        # Get video properties
-        cap = cv2.VideoCapture(temp_video.name)
-        st.session_state.video_total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        st.session_state.video_fps = cap.get(cv2.CAP_PROP_FPS)
-        if st.session_state.video_fps <= 0:
-            st.session_state.video_fps = 30
-        cap.release()
-        
-        # Start a thread to process the video
-        st.session_state.video_path = temp_video.name
-        st.session_state.video_position = 0
-        st.session_state.video_paused = False
-        st.session_state.started = True
+        try:
+            st.session_state.current_source_type = "video"
+            temp_video = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+            temp_video.write(uploaded_video.getvalue())
+            temp_video.close()
+            
+            # Get video properties
+            cap = cv2.VideoCapture(temp_video.name)
+            if not cap.isOpened():
+                st.error(f"Failed to open video file. The file may be corrupted or in an unsupported format.")
+                st.stop()
+                
+            st.session_state.video_total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            st.session_state.video_fps = cap.get(cv2.CAP_PROP_FPS)
+            if st.session_state.video_fps <= 0:
+                st.session_state.video_fps = 30
+            cap.release()
+            
+            # Start a thread to process the video
+            st.session_state.video_path = temp_video.name
+            st.session_state.video_position = 0
+            st.session_state.video_paused = False
+            st.session_state.started = True
+            
+        except Exception as e:
+            st.error(f"Error processing video file: {str(e)}")
+            st.stop()
         
     elif source_type == "Image File" and 'uploaded_image' in locals() and uploaded_image is not None:
         # Process a single image
@@ -457,27 +490,36 @@ if stop_button:
 
 # Process video file frame-by-frame
 if st.session_state.started and st.session_state.current_source_type == "video" and not st.session_state.video_paused:
-    cap = cv2.VideoCapture(st.session_state.video_path)
-    
-    # Seek to the current position
-    cap.set(cv2.CAP_PROP_POS_FRAMES, st.session_state.video_position)
-    
-    # Read the current frame
-    ret, frame = cap.read()
-    if ret:
-        # Ensure frame is BGR (3 channels)
-        if len(frame.shape) == 2:  # Grayscale
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-        elif frame.shape[2] == 4:  # RGBA
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-            
-        st.session_state.current_frame = frame
-        st.session_state.video_position += 1
-    else:
-        # End of video
+    try:
+        cap = cv2.VideoCapture(st.session_state.video_path)
+        
+        if not cap.isOpened():
+            st.error("Failed to open video file for processing.")
+            st.session_state.started = False
+            st.stop()
+        
+        # Seek to the current position
+        cap.set(cv2.CAP_PROP_POS_FRAMES, st.session_state.video_position)
+        
+        # Read the current frame
+        ret, frame = cap.read()
+        if ret:
+            # Ensure frame is BGR (3 channels)
+            if len(frame.shape) == 2:  # Grayscale
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+            elif frame.shape[2] == 4:  # RGBA
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                
+            st.session_state.current_frame = frame
+            st.session_state.video_position += 1
+        else:
+            # End of video
+            st.session_state.video_paused = True
+        
+        cap.release()
+    except Exception as e:
+        st.error(f"Error processing video frame: {str(e)}")
         st.session_state.video_paused = True
-    
-    cap.release()
 
 # Process current frame with YOLO model
 if st.session_state.started and st.session_state.current_frame is not None:
@@ -616,7 +658,7 @@ if st.session_state.started:
         
         # Convert from BGR to RGB
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        video_display.image(rgb_frame, channels="RGB", use_column_width=True)
+        video_display.image(rgb_frame, channels="RGB", use_container_width=True)
     
     # Update danger meter
     danger_level = st.session_state.danger_level
