@@ -18,7 +18,6 @@ def calculate_danger(results):
     """
     if not results or not hasattr(results, 'boxes') or results.boxes is None or len(results.boxes) == 0:
         return 0, "Fire: 0.0% | Smoke: 0.0% | Combined: 0.0%"
-
     img_height, img_width = results.orig_shape
     total_area = max(1, img_height * img_width)
     
@@ -50,7 +49,48 @@ def calculate_danger(results):
 # Streamlit App UI
 # ------------------------------
 st.set_page_config(page_title="Fire Detection System", layout="wide")
-st.title("Fire Detection System")
+
+# Create a row with two columns: one for the title, one for the styled download button
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.title("Fire Detection System")
+with col2:
+    # We create a container that pushes the button to the bottom using flexbox.
+    st.markdown(
+        """
+        <div class="bottom-container">
+            <a href="https://drive.google.com/file/d/1tWsjRH6mMC1XvkdPuweDh2b4SxHhbVrA/view?usp=drive_link" 
+               target="_blank" class="download-button">
+                Download the app
+            </a>
+        </div>
+        <style>
+        .bottom-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+        .download-button {
+            border: none;                  /* No border */
+            background-color: #c3e6cb;     /* Light green background */
+            color: #28a745;               /* Green text */
+            padding: 10px 16px;
+            border-radius: 12px;          /* Rounded corners */
+            font-weight: bold;
+            cursor: pointer;
+            text-decoration: none;        /* Remove link underline */
+            display: inline-block;        /* Keep button shape */
+            text-align: center;
+            width: 100%;
+        }
+        .download-button:hover {
+            background-color: #a5d6a7;     /* Slightly darker on hover */
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 # 1) If no model is in session state, set defaults
 if 'model' not in st.session_state:
