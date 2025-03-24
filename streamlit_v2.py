@@ -19,7 +19,6 @@ def calculate_danger(results):
     if not results or not hasattr(results, 'boxes') or results.boxes is None or len(results.boxes) == 0:
         return 0, "Fire: 0.0% | Smoke: 0.0% | Combined: 0.0%"
 
-    # Get image dimensions from original image shape (assumes [height, width])
     img_height, img_width = results.orig_shape
     total_area = max(1, img_height * img_width)
     
@@ -27,11 +26,9 @@ def calculate_danger(results):
     smoke_mask = np.zeros((img_height, img_width), dtype=np.uint8)
     
     for box in results.boxes:
-        # Get bounding box coordinates and class
         coords = box.xyxy[0].cpu().numpy() if hasattr(box, 'xyxy') else box.cpu().numpy()
         cls = int(box.cls.cpu().numpy()[0]) if hasattr(box, 'cls') else 0
         x1, y1, x2, y2 = [int(coord) for coord in coords[:4]]
-        # Clamp coordinates to image bounds
         x1 = max(0, min(x1, img_width - 1))
         x2 = max(0, min(x2, img_width - 1))
         y1 = max(0, min(y1, img_height - 1))
@@ -63,7 +60,6 @@ if 'model' not in st.session_state:
 # Sidebar: Allow user to upload a model file.
 uploaded_model = st.sidebar.file_uploader("Upload YOLO Model", type=["pt", "pth", "weights"])
 if uploaded_model is not None:
-    # Save uploaded file to a temporary file and load the model from it.
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp_file:
         tmp_file.write(uploaded_model.read())
         tmp_file.flush()
@@ -75,14 +71,14 @@ if uploaded_model is not None:
     except Exception as e:
         st.sidebar.error(f"Error loading uploaded model: {e}")
 else:
-    # If no model is uploaded and no model loaded yet, load the default.
+    # If no model is uploaded and no model loaded yet, preload default "best.pt"
     if st.session_state.model is None:
         try:
             st.session_state.model = YOLO("best.pt")
             st.session_state.model_path = "best.pt"
             st.sidebar.info("Loaded default model (best.pt).")
         except Exception as e:
-            st.sidebar.error(f"Error loading default model: {e}")
+            st.sidebar.error(f"Error loading default model 'best.pt': {e}")
 
 # Sidebar: Other controls.
 st.sidebar.header("Settings")
@@ -95,7 +91,6 @@ else:
     uploaded_file = st.sidebar.file_uploader("Upload File", 
                       type=["mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png"])
 
-# Start/Stop buttons.
 if st.sidebar.button("Start"):
     st.session_state.run_stream = True
 if st.sidebar.button("Stop"):
@@ -117,17 +112,18 @@ def process_stream():
         if url == "":
             st.error("Please provide a valid URL.")
             return
-        cap = cv2.VideoCapture(url)
+        # Use FFMPEG backend and reduce buffering.
+        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     elif source_type == "MJPEG Stream":
         if url == "":
             st.error("Please provide a valid URL.")
             return
-        # MJPEG stream will be handled using requests.
+        # MJPEG stream handled via HTTP requests.
     elif source_type == "Video File":
         if uploaded_file is None:
             st.error("Please upload a video file.")
             return
-        # Save uploaded file to a temporary file for cv2.VideoCapture.
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(uploaded_file.read())
         cap = cv2.VideoCapture(tfile.name)
@@ -152,7 +148,6 @@ def process_stream():
     prev_time = time.time()
     frame_count = 0
 
-    # Loop to read frames and update display.
     while st.session_state.run_stream:
         if source_type == "MJPEG Stream":
             try:
@@ -170,25 +165,26 @@ def process_stream():
                 st.error(f"Error fetching MJPEG frame: {e}")
                 break
         else:
+            # Flush stale frames to reduce lag.
+            # Flush a few frames (adjust the count if needed)
+            for _ in range(5):
+                cap.grab()
             ret, frame = cap.read()
             if not ret:
                 st.warning("No frame received. Ending stream...")
                 break
 
-        # Run YOLO detection.
         try:
             results = st.session_state.model(frame, verbose=False)
         except Exception as e:
             st.error(f"Error during detection: {e}")
             break
 
-        # Annotate frame if detections exist.
         if results and len(results) > 0:
             annotated_frame = results[0].plot()
         else:
             annotated_frame = frame.copy()
 
-        # Calculate and display FPS.
         frame_count += 1
         curr_time = time.time()
         elapsed = curr_time - prev_time
@@ -201,20 +197,18 @@ def process_stream():
         cv2.putText(annotated_frame, f"FPS: {fps:.1f}", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        # Calculate danger level (if detections available).
         if results and len(results) > 0:
             danger_level, danger_text = calculate_danger(results[0])
         else:
             danger_level, danger_text = 0, "No detections"
 
-        # Update the image and danger meter.
         image_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
         danger_placeholder.progress(int(danger_level))
         danger_placeholder.text(danger_text)
 
-        time.sleep(0.05)
+        # A short sleep to yield control; adjust as needed.
+        time.sleep(0.02)
 
-    # Cleanup.
     if cap is not None:
         cap.release()
     if tfile is not None:
