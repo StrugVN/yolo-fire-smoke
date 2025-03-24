@@ -47,7 +47,6 @@ def calculate_danger(results):
     smoke_coverage = (smoke_area / total_area) * 100
     combined = min(100, fire_coverage + smoke_coverage)
     text = f"Fire: {fire_coverage:.1f}% | Smoke: {smoke_coverage:.1f}% | Combined: {combined:.1f}%"
-    # For simplicity, use the combined percentage as the danger level
     return combined, text
 
 # ------------------------------
@@ -56,44 +55,53 @@ def calculate_danger(results):
 st.set_page_config(page_title="Fire Detection System", layout="wide")
 st.title("Fire Detection System")
 
-# Use session_state to store streaming flag and the YOLO model
-if 'run_stream' not in st.session_state:
-    st.session_state.run_stream = False
-
+# Preload YOLO model into session state.
 if 'model' not in st.session_state:
-    # Default model path; ensure that this file (e.g., best.pt) is accessible
-    st.session_state.model_path = "best.pt"
-    st.session_state.model = YOLO(st.session_state.model_path)
+    st.session_state.model = None
+    st.session_state.model_path = None
 
-# Sidebar controls
+# Sidebar: Allow user to upload a model file.
+uploaded_model = st.sidebar.file_uploader("Upload YOLO Model", type=["pt", "pth", "weights"])
+if uploaded_model is not None:
+    # Save uploaded file to a temporary file and load the model from it.
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp_file:
+        tmp_file.write(uploaded_model.read())
+        tmp_file.flush()
+        model_path = tmp_file.name
+    try:
+        st.session_state.model = YOLO(model_path)
+        st.session_state.model_path = model_path
+        st.sidebar.success("Model loaded successfully from uploaded file.")
+    except Exception as e:
+        st.sidebar.error(f"Error loading uploaded model: {e}")
+else:
+    # If no model is uploaded and no model loaded yet, load the default.
+    if st.session_state.model is None:
+        try:
+            st.session_state.model = YOLO("best.pt")
+            st.session_state.model_path = "best.pt"
+            st.sidebar.info("Loaded default model (best.pt).")
+        except Exception as e:
+            st.sidebar.error(f"Error loading default model: {e}")
+
+# Sidebar: Other controls.
 st.sidebar.header("Settings")
 source_type = st.sidebar.selectbox("Select Source", 
     ["RTSP Stream", "MJPEG Stream", "Video File", "Image"])
 
-# Model file (if you wish to change the model path)
-model_path = st.sidebar.text_input("YOLO Model Path", value=st.session_state.model_path)
-if model_path != st.session_state.model_path:
-    try:
-        st.session_state.model = YOLO(model_path)
-        st.session_state.model_path = model_path
-        st.sidebar.success(f"Model loaded: {model_path}")
-    except Exception as e:
-        st.sidebar.error(f"Error loading model: {e}")
-
-# Depending on the source, get URL or file uploader
 if source_type in ["RTSP Stream", "MJPEG Stream"]:
     url = st.sidebar.text_input("Stream URL", value="")
 else:
     uploaded_file = st.sidebar.file_uploader("Upload File", 
                       type=["mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png"])
 
-# Start/Stop buttons
+# Start/Stop buttons.
 if st.sidebar.button("Start"):
     st.session_state.run_stream = True
 if st.sidebar.button("Stop"):
     st.session_state.run_stream = False
 
-# Placeholders for image and metrics
+# Placeholders for image and metrics.
 image_placeholder = st.empty()
 danger_placeholder = st.empty()
 fps_placeholder = st.empty()
@@ -114,17 +122,16 @@ def process_stream():
         if url == "":
             st.error("Please provide a valid URL.")
             return
-        # For MJPEG, we'll use requests to continuously fetch images.
+        # MJPEG stream will be handled using requests.
     elif source_type == "Video File":
         if uploaded_file is None:
             st.error("Please upload a video file.")
             return
-        # Save uploaded file to a temporary file for cv2.VideoCapture
+        # Save uploaded file to a temporary file for cv2.VideoCapture.
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(uploaded_file.read())
         cap = cv2.VideoCapture(tfile.name)
 
-    # Process image source separately
     if source_type == "Image":
         if uploaded_file is None:
             st.error("Please upload an image file.")
@@ -145,7 +152,7 @@ def process_stream():
     prev_time = time.time()
     frame_count = 0
 
-    # Loop to read frames and update display
+    # Loop to read frames and update display.
     while st.session_state.run_stream:
         if source_type == "MJPEG Stream":
             try:
@@ -168,20 +175,20 @@ def process_stream():
                 st.warning("No frame received. Ending stream...")
                 break
 
-        # Run YOLO detection
+        # Run YOLO detection.
         try:
             results = st.session_state.model(frame, verbose=False)
         except Exception as e:
             st.error(f"Error during detection: {e}")
             break
 
-        # Annotate frame if detections exist
+        # Annotate frame if detections exist.
         if results and len(results) > 0:
             annotated_frame = results[0].plot()
         else:
             annotated_frame = frame.copy()
 
-        # Calculate and display FPS
+        # Calculate and display FPS.
         frame_count += 1
         curr_time = time.time()
         elapsed = curr_time - prev_time
@@ -194,21 +201,20 @@ def process_stream():
         cv2.putText(annotated_frame, f"FPS: {fps:.1f}", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        # Calculate danger level (from detection result, if available)
+        # Calculate danger level (if detections available).
         if results and len(results) > 0:
             danger_level, danger_text = calculate_danger(results[0])
         else:
             danger_level, danger_text = 0, "No detections"
 
-        # Update the image and danger meter in the Streamlit placeholders
+        # Update the image and danger meter.
         image_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
         danger_placeholder.progress(int(danger_level))
         danger_placeholder.text(danger_text)
 
-        # Small delay to avoid overloading CPU
         time.sleep(0.05)
 
-    # Cleanup
+    # Cleanup.
     if cap is not None:
         cap.release()
     if tfile is not None:
@@ -217,6 +223,5 @@ def process_stream():
         except Exception:
             pass
 
-# Run the stream processing if flagged
-if st.session_state.run_stream:
+if st.session_state.get("run_stream", False):
     process_stream()
