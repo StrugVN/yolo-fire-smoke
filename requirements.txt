@@ -3,3 +3,4 @@ opencv-python-headless
 numpy
 ultralytics
 requests
+libgl1-mesa-glx
