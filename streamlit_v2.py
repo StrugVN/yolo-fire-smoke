@@ -7,10 +7,6 @@ import os
 import requests
 from ultralytics import YOLO
 
-@st.cache_resource
-def load_model(model_path="/mount/src/yolo-fire-smoke/best.pt"):    # for deploy
-    return YOLO(model_path)
-
 # ------------------------------
 # Helper function: Calculate danger level
 # ------------------------------
@@ -144,7 +140,7 @@ else:
     # If no model is uploaded and we still have no model, load best.pt by default
     if st.session_state.model is None:
         try:
-            st.session_state.model = model = load_model()
+            st.session_state.model = model = YOLO(r"/mount/src/yolo-fire-smoke/best.pt")
             st.session_state.model_path = "best.pt"
             st.sidebar.info("Loaded default model (best.pt).")
         except Exception as e:
