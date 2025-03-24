@@ -8,7 +8,7 @@ import requests
 from ultralytics import YOLO
 
 @st.cache_resource
-def load_model(model_path="best.pt"):
+def load_model(model_path="/mount/src/yolo-fire-smoke/best.pt"):    # for deploy
     return YOLO(model_path)
 
 # ------------------------------
@@ -106,7 +106,7 @@ st.sidebar.header("Settings")
 source_type = st.sidebar.radio(
     "Select Source", 
     ["RTSP Stream", "MJPEG Stream", "Video File", "Image"],
-    index=1  # Example default index
+    index=0  # Example default index
 )
 
 # 3) Stop any ongoing stream if the user changes source
@@ -164,6 +164,9 @@ fire_smoke_placeholder = st.empty()  # Will show Fire(x) Smoke(x)
 image_placeholder = st.empty()       # Main video frame
 danger_placeholder = st.empty()      # Danger bar
 fps_placeholder = st.empty()         # If you want to display FPS outside the frame
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Version 0.0.0**")
 
 # ------------------------------
 # Main Loop: Stream Processing
