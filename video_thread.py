@@ -167,6 +167,12 @@ class VideoThread(QThread):
                 # Draw results
                 if results and len(results) > 0:
                     annotated_frame = results[0].plot()
+
+                    # Overlay index labels on the frame
+                    if self.danger_meter and hasattr(self.danger_meter, 'detection_boxes'):
+                        for (x, y, label) in self.danger_meter.detection_boxes:
+                            cv2.putText(annotated_frame, label, (x, y - 10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
                     
                     # Add FPS counter
                     cv2.putText(
@@ -317,6 +323,12 @@ class VideoThread(QThread):
                 # Draw results
                 if results and len(results) > 0:
                     annotated_frame = results[0].plot()
+                    
+                    # Overlay index labels on the frame
+                    if self.danger_meter and hasattr(self.danger_meter, 'detection_boxes'):
+                        for (x, y, label) in self.danger_meter.detection_boxes:
+                            cv2.putText(annotated_frame, label, (x, y - 10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
                     
                     # Add FPS counter and frame position
                     cv2.putText(

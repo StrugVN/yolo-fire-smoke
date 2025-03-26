@@ -275,6 +275,14 @@ class YOLODetectionApp(QMainWindow):
         
         # Add bottom control layout to main layout
         main_layout.addLayout(bottom_control_layout)
+
+        # Add a new label to display detection details (table of detections)
+        self.detection_details_label = QLabel()
+        self.detection_details_label.setWordWrap(True)
+        self.detection_details_label.setStyleSheet("font-size: 10pt; color: #333; margin-top: 5px;")
+        self.detection_details_label.setVisible(False)
+        main_layout.addWidget(self.detection_details_label)
+
         
         # Flag for slider updates
         self.slider_is_being_dragged = False
@@ -767,8 +775,63 @@ class YOLODetectionApp(QMainWindow):
         self.play_pause_btn.setText("Play")
 
     def update_danger_meter(self, result):
-        """Update the danger meter based on YOLO detection result"""
-        self.danger_meter.update_meter(self.danger_meter.calculate_danger(result))
+        new_risk = self.danger_meter.calculate_danger(result)
+        self.danger_meter.update_meter(new_risk)
+        
+        # If detection data is available, build an HTML table
+        if hasattr(self.danger_meter, 'detection_data') and self.danger_meter.detection_data:
+            # Sort detections: first Fire (cls==0) then Smoke (cls==1), in order of index
+            detection_data_sorted = sorted(
+                self.danger_meter.detection_data, 
+                key=lambda d: (d["cls"], d["index"])
+            )
+            
+            # Count how many Fire vs. Smoke
+            count_fire = sum(1 for d in detection_data_sorted if d["cls"] == 0)
+            count_smoke = sum(1 for d in detection_data_sorted if d["cls"] == 1)
+            
+            # Start with a summary line
+            # (Use :, to get thousand separators, e.g. 1,234)
+            details_html = (
+                f"<b>Detection:</b> {count_fire:,} Fire - {count_smoke:,} Smoke<br><br>"
+            )
+            
+            # Build a simple HTML table
+            details_html += """
+            <table style="border-collapse: collapse;">
+            <tr>
+                <th style="padding: 0 8px; text-align: left;">Object label</th>
+                <th style="padding: 0 8px; text-align: left;">Confidence</th>
+                <th style="padding: 0 8px; text-align: left;">Area</th>
+            </tr>
+            """
+            
+            # Add one row per detection
+            for d in detection_data_sorted:
+                label = d['label']              # e.g. "fire_0"
+                conf = d['conf']               # confidence float
+                area = d['area']               # bounding box area
+                details_html += f"""
+                <tr>
+                <td style="padding: 0 8px;">{label}</td>
+                <td style="padding: 0 8px;">{conf:.2f}</td>
+                <td style="padding: 0 8px;">{area:,}</td>
+                </tr>
+                """
+            
+            # Close the table
+            details_html += "</table>"
+            
+            # Assign to the label and make sure it's visible
+            self.detection_details_label.setText(details_html)
+            self.detection_details_label.setVisible(True)
+        else:
+            # If no detections, clear the label
+            self.detection_details_label.setText("")
+            self.detection_details_label.setVisible(False)
+
+
+
 
 
 if __name__ == "__main__":

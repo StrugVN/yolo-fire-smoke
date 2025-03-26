@@ -84,59 +84,97 @@ class DangerMeter:
         current_time = time.time()
         has_fire = False
         has_smoke = False
-        
+
         # Default return if no results
         if not results or not hasattr(results, 'boxes') or results.boxes is None:
             self.fire_coverage = 0
             self.smoke_coverage = 0
             self._handle_clearance(current_time)
+            # Clear detection data when no detections
+            self.detection_data = []
+            self.detection_boxes = []
             return self._calculate_final_danger_level()
-        
+
         # Get image dimensions
         img_height, img_width = results.orig_shape
         total_screen_area = max(1, img_height * img_width)
-        
+
         # Create mask images for fire and smoke to account for overlaps
         import numpy as np
         fire_mask = np.zeros((img_height, img_width), dtype=np.uint8)
         smoke_mask = np.zeros((img_height, img_width), dtype=np.uint8)
-        
-        # Extract bounding boxes and classes
+
         boxes = results.boxes
         if len(boxes) == 0:
             self.fire_coverage = 0
             self.smoke_coverage = 0
             self._handle_clearance(current_time)
+            # Clear detection data if no boxes
+            self.detection_data = []
+            self.detection_boxes = []
             return self._calculate_final_danger_level()
-        
+
+        # Initialize lists to store detection data and positions for drawing
+        self.detection_data = []   # List of dicts: each with label, cls, index, conf, area, x, y.
+        self.detection_boxes = []  # For drawing labels on the frame: list of (x, y, label)
+        fire_index = 0
+        smoke_index = 0
+
         # Process each detection
         for i in range(len(boxes)):
             # Get box coordinates and class
             box = boxes[i].xyxy[0].cpu().numpy() if hasattr(boxes[i], 'xyxy') else boxes[i].cpu().numpy()
             cls = int(boxes[i].cls.cpu().numpy()[0]) if hasattr(boxes[i], 'cls') else 0
-            
-            # Get integer coordinates for mask
+
+            # Get confidence (if available)
+            if hasattr(boxes[i], 'conf'):
+                conf = float(boxes[i].conf.cpu().numpy()[0])
+            else:
+                conf = 0.0
+
+            # Get integer coordinates for the bounding box
             x1, y1, x2, y2 = [int(coord) for coord in box[:4]]
-            
-            # Keep coordinates within image bounds
-            x1 = max(0, min(x1, img_width-1))
-            x2 = max(0, min(x2, img_width-1))
-            y1 = max(0, min(y1, img_height-1))
-            y2 = max(0, min(y2, img_height-1))
-            
-            # Add to appropriate mask
+
+            # Ensure coordinates are within image bounds
+            x1 = max(0, min(x1, img_width - 1))
+            x2 = max(0, min(x2, img_width - 1))
+            y1 = max(0, min(y1, img_height - 1))
+            y2 = max(0, min(y2, img_height - 1))
+
+            # Process fire and smoke detections separately and assign index label
             if cls == 0:  # Fire class
                 fire_mask[y1:y2, x1:x2] = 1
                 has_fire = True
+                label = f"fire_{fire_index}"
+                index = fire_index
+                fire_index += 1
             elif cls == 1:  # Smoke class
                 smoke_mask[y1:y2, x1:x2] = 1
                 has_smoke = True
-        
-        # Calculate areas from masks (this accounts for overlaps)
+                label = f"smoke_{smoke_index}"
+                index = smoke_index
+                smoke_index += 1
+            else:
+                continue  # Skip any other classes
+
+            # Calculate bounding box area
+            area = (x2 - x1) * (y2 - y1)
+            # Save detailed detection data
+            self.detection_data.append({
+                "label": label,
+                "cls": cls,
+                "index": index,
+                "conf": conf,
+                "area": area,
+                "x": x1,
+                "y": y1
+            })
+            # Save position for drawing label on the frame
+            self.detection_boxes.append((x1, y1, label))
+
+        # Calculate coverage percentages from masks
         fire_area = np.sum(fire_mask)
         smoke_area = np.sum(smoke_mask)
-        
-        # Calculate coverage percentages
         self.fire_coverage = (fire_area / total_screen_area) * 100
         self.smoke_coverage = (smoke_area / total_screen_area) * 100
         

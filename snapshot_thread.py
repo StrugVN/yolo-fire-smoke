@@ -56,6 +56,12 @@ class SnapshotThread(QThread):
                         
                         annotated_frame = results[0].plot() if results else frame
                         
+                        # Overlay index labels on the frame
+                        if self.danger_meter and hasattr(self.danger_meter, 'detection_boxes'):
+                            for (x, y, label) in self.danger_meter.detection_boxes:
+                                cv2.putText(annotated_frame, label, (x, y - 10),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                        
                         # FPS calculation
                         self.frame_count += 1
                         elapsed_time = time.time() - self.start_time
